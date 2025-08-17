@@ -1,8 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import { addWeeks, format } from 'date-fns';
 import { nl } from 'date-fns/locale';
+import { syncData } from '@/lib/firebase';
 
 /* =========================
    Types
@@ -209,7 +216,17 @@ export default function Page() {
   const isAdmin = myName === ADMIN_NAME;
 
   /* --- Core state --- */
-  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [reservations, _setReservations] = useState<Reservation[]>([]);
+  const setReservations: Dispatch<SetStateAction<Reservation[]>> = (updater) => {
+    _setReservations((prev) => {
+      const next =
+        typeof updater === 'function'
+          ? (updater as (p: Reservation[]) => Reservation[])(prev)
+          : updater;
+      syncData.setReservations(next);
+      return next;
+    });
+  };
   const [availability, setAvailability] = useState<Availability>({});
   const [matchTypes, setMatchTypes] = useState<
     Record<string, 'single' | 'double'>
@@ -242,7 +259,7 @@ export default function Page() {
   useEffect(() => {
     try {
       const r = localStorage.getItem(RESERV_KEY);
-      if (r) setReservations(JSON.parse(r));
+      if (r) _setReservations(JSON.parse(r));
       const a = localStorage.getItem(AVAIL_KEY);
       if (a) setAvailability(JSON.parse(a));
       const mt = localStorage.getItem(MATCHTYPE_KEY);
@@ -301,7 +318,7 @@ export default function Page() {
     const onStorage = (e: StorageEvent) => {
       try {
         if (e.key === RESERV_KEY && e.newValue)
-          setReservations(JSON.parse(e.newValue));
+          _setReservations(JSON.parse(e.newValue));
         if (e.key === AVAIL_KEY && e.newValue)
           setAvailability(JSON.parse(e.newValue));
         if (e.key === MATCHTYPE_KEY && e.newValue)
@@ -331,6 +348,14 @@ export default function Page() {
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  // Realtime updates via Firestore
+  useEffect(() => {
+    const unsub = syncData.onReservationsChange((data) => {
+      _setReservations(data);
+    });
+    return unsub;
   }, []);
 
   /* =========================
