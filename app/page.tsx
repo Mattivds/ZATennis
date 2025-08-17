@@ -9,35 +9,12 @@ import {
 } from 'react';
 import { addWeeks, format } from 'date-fns';
 import { nl } from 'date-fns/locale';
-import { syncData } from '@/lib/firebase';
+import { syncData, type MatchCategory, type Reservation } from '@/lib/firebase';
 
 /* =========================
    Types
 ========================= */
-type MatchCategory = 'training' | 'wedstrijd';
-
-interface Reservation {
-  date: string; // yyyy-MM-dd
-  timeSlot: string; // '18u30-19u30'
-  court: number; // 1..3
-  matchType: 'single' | 'double';
-  category: MatchCategory; // training | wedstrijd
-  // Bij single: players: [a,b]
-  // Bij double: players: [x1,x2,y1,y2]
-  // Lege plekken worden bewaard als '' zodat spelers stapsgewijs kunnen invullen
-  players: string[];
-  // Resultaat:
-  // single:  { winner: 'A', loser: 'B' }
-  // double:  { winners: ['A','B'], losers: ['C','D'] }
-  result?: {
-    winner?: string;
-    loser?: string;
-    winners?: [string, string];
-    losers?: [string, string];
-  };
-  // Markering om dubbele meldingen te vermijden zodra match voor het eerst vol is
-  notifiedFull?: boolean;
-}
+// Reservation and MatchCategory types come from firebase sync helper
 
 type Availability = Record<string, Record<string, Record<string, boolean>>>;
 
