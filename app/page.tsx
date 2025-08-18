@@ -886,7 +886,6 @@ export default function Page() {
       };
       setReservations((prev) => [...prev, fresh]);
       if (fresh.notifiedFull) sendMatchFullMessages(fresh);
-      syncData.saveReservation(fresh);
       return;
     }
 
@@ -916,7 +915,6 @@ export default function Page() {
     setReservations((prev) =>
       prev.map((r) => (r === existing ? updated : r))
     );
-    syncData.saveReservation(updated);
 
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
@@ -935,7 +933,6 @@ export default function Page() {
     // Resultaat ongeldig maken als teams/players wijzigen
     delete copy.result;
     setReservations((prev) => prev.map((r) => (r === res ? copy : r)));
-    syncData.saveReservation(copy);
   };
 
   const removeReservation = (date: string, timeSlot: string, court: number) => {
@@ -953,7 +950,6 @@ export default function Page() {
           !(r.date === date && r.timeSlot === timeSlot && r.court === court)
       )
     );
-    syncData.deleteReservation(date, timeSlot, court);
   };
 
   /* =========================
