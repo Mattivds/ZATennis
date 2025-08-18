@@ -771,6 +771,7 @@ export default function Page() {
     setReservations([]);
     localStorage.setItem(RESERV_KEY, JSON.stringify([]));
     setMatchTypes({});
+    syncData.setMatchTypes({});
     setCategories({});
     localStorage.setItem(MATCHTYPE_KEY, JSON.stringify({}));
     localStorage.setItem(CATEGORY_KEY, JSON.stringify({}));

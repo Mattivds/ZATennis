@@ -12,6 +12,7 @@ import {
   doc,
   onSnapshot,
   setDoc,
+  getDocs,
   writeBatch,
   serverTimestamp,
   type DocumentData,
@@ -111,9 +112,12 @@ export const syncData = {
 
   async setReservations(reservations: Reservation[]) {
     await ensureAuth();
+    const snap = await getDocs(collReservations);
+    const existing = new Set(snap.docs.map((d) => d.id));
     const batch = writeBatch(db);
     reservations.forEach((r) => {
       const id = `${r.date}_${r.timeSlot}_${r.court}`;
+      existing.delete(id);
       batch.set(
         doc(db, 'reservations', id),
         {
@@ -123,6 +127,7 @@ export const syncData = {
         { merge: true }
       );
     });
+    existing.forEach((id) => batch.delete(doc(db, 'reservations', id)));
     await batch.commit();
   },
 
