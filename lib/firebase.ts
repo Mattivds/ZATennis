@@ -12,8 +12,8 @@ import {
   doc,
   onSnapshot,
   setDoc,
-  getDocs,
   writeBatch,
+  deleteDoc,
   serverTimestamp,
   type DocumentData,
 } from 'firebase/firestore';
@@ -84,6 +84,9 @@ type Availability = Record<string, Record<string, Record<string, boolean>>>;
 const collReservations = collection(db, 'reservations');
 const collAvailability = collection(db, 'availability');
 
+const reservationId = (r: { date: string; timeSlot: string; court: number }) =>
+  `${r.date}_${r.timeSlot}_${r.court}`;
+
 // UI-state onder /ui/… (1 document per “helper”)
 const docMatchTypes = doc(db, 'ui', 'matchTypes'); // { [courtKey]: 'single' | 'double' }
 const docSelectedDate = doc(db, 'ui', 'selectedDate'); // { value: 'yyyy-MM-dd' }
@@ -91,44 +94,46 @@ const docSelectedDate = doc(db, 'ui', 'selectedDate'); // { value: 'yyyy-MM-dd' 
 export const syncData = {
   // --- Reservations (collection) ---
   onReservationsChange(cb: (data: Reservation[]) => void) {
-    return onSnapshot(collReservations, (snap) => {
-      const list: Reservation[] = [];
-      snap.forEach((d) => {
-        const r = d.data() as DocumentData;
-        list.push({
-          date: r.date,
-          timeSlot: r.timeSlot ?? r.time_slot,
-          court: r.court,
-          matchType: (r.matchType ?? r.match_type) as MatchType,
-          category: r.category as MatchCategory,
-          players: r.players ?? [],
-          result: r.result as ReservationResult | undefined,
-          notifiedFull: r.notifiedFull,
+    let unsub = () => {};
+    ensureAuth().then(() => {
+      unsub = onSnapshot(collReservations, (snap) => {
+        const list: Reservation[] = [];
+        snap.forEach((d) => {
+          const r = d.data() as DocumentData;
+          list.push({
+            date: r.date,
+            timeSlot: r.timeSlot ?? r.time_slot,
+            court: r.court,
+            matchType: (r.matchType ?? r.match_type) as MatchType,
+            category: r.category as MatchCategory,
+            players: r.players ?? [],
+            result: r.result as ReservationResult | undefined,
+            notifiedFull: r.notifiedFull,
+          });
         });
+        cb(list);
       });
-      cb(list);
     });
+    return () => unsub();
   },
 
-  async setReservations(reservations: Reservation[]) {
+  async saveReservation(r: Reservation) {
     await ensureAuth();
-    const snap = await getDocs(collReservations);
-    const existing = new Set(snap.docs.map((d) => d.id));
-    const batch = writeBatch(db);
-    reservations.forEach((r) => {
-      const id = `${r.date}_${r.timeSlot}_${r.court}`;
-      existing.delete(id);
-      batch.set(
-        doc(db, 'reservations', id),
-        {
-          ...r,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
-    existing.forEach((id) => batch.delete(doc(db, 'reservations', id)));
-    await batch.commit();
+    await setDoc(
+      doc(db, 'reservations', reservationId(r)),
+      {
+        ...r,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  },
+
+  async deleteReservation(date: string, timeSlot: string, court: number) {
+    await ensureAuth();
+    await deleteDoc(
+      doc(db, 'reservations', reservationId({ date, timeSlot, court }))
+    );
   },
 
   // --- Availability (collection) ---

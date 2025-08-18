@@ -194,13 +194,31 @@ export default function Page() {
 
   /* --- Core state --- */
   const [reservations, _setReservations] = useState<Reservation[]>([]);
+  const reservationId = (r: { date: string; timeSlot: string; court: number }) =>
+    `${r.date}_${r.timeSlot}_${r.court}`;
   const setReservations: Dispatch<SetStateAction<Reservation[]>> = (updater) => {
     _setReservations((prev) => {
       const next =
         typeof updater === 'function'
           ? (updater as (p: Reservation[]) => Reservation[])(prev)
           : updater;
-      syncData.setReservations(next);
+
+      const prevMap = new Map(prev.map((r) => [reservationId(r), r]));
+      const nextMap = new Map(next.map((r) => [reservationId(r), r]));
+
+      nextMap.forEach((r, id) => {
+        const before = prevMap.get(id);
+        if (!before || JSON.stringify(before) !== JSON.stringify(r)) {
+          syncData.saveReservation(r);
+        }
+      });
+
+      prevMap.forEach((r, id) => {
+        if (!nextMap.has(id)) {
+          syncData.deleteReservation(r.date, r.timeSlot, r.court);
+        }
+      });
+
       return next;
     });
   };
