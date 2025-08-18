@@ -886,6 +886,7 @@ export default function Page() {
       };
       setReservations((prev) => [...prev, fresh]);
       if (fresh.notifiedFull) sendMatchFullMessages(fresh);
+      syncData.saveReservation(fresh);
       return;
     }
 
@@ -904,50 +905,37 @@ export default function Page() {
     newPlayers[emptyIdx] = myName!;
     const willBeFull = newPlayers.every((p) => !!p);
 
+    const updated: Reservation = {
+      ...existing,
+      players: newPlayers,
+      // markeer enkel wanneer we NU voor het eerst vol worden
+      notifiedFull: existing.notifiedFull || willBeFull,
+    };
+    if (willBeFull === false) delete updated.result;
+
     setReservations((prev) =>
-      prev.map((r) => {
-        if (r !== existing) return r;
-        const copy: Reservation = {
-          ...r,
-          players: newPlayers,
-          // markeer enkel wanneer we NU voor het eerst vol worden
-          notifiedFull: r.notifiedFull || willBeFull,
-        };
-        // Resultaat ongeldig zodra samenstelling wijzigde
-        if (willBeFull === false) delete copy.result;
-        return copy;
-      })
+      prev.map((r) => (r === existing ? updated : r))
     );
+    syncData.saveReservation(updated);
 
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
-      const fullRes: Reservation = {
-        ...existing,
-        players: newPlayers,
-        notifiedFull: true,
-        matchType: mt,
-        category: cat,
-      };
-      sendMatchFullMessages(fullRes);
+      sendMatchFullMessages(updated);
     }
   };
 
   const leaveCourt = (res: Reservation, who: string) => {
     if (!isAdmin && who !== myName) return;
-    setReservations((prev) =>
-      prev.map((r) => {
-        if (r !== res) return r;
-        const idx = r.players.findIndex((p) => p === who);
-        if (idx === -1) return r;
-        const copy: Reservation = { ...r, players: [...r.players] };
-        copy.players[idx] = '';
-        // Match is niet meer vol -> terug open, reset notifiedFull
-        copy.notifiedFull = false;
-        // Resultaat ongeldig maken als teams/players wijzigen
-        delete copy.result;
-        return copy;
-      })
-    );
+    const idx = res.players.findIndex((p) => p === who);
+    if (idx === -1) return;
+    const copy: Reservation = { ...res, players: [...res.players] };
+    copy.players[idx] = '';
+    // Match is niet meer vol -> terug open, reset notifiedFull
+    copy.notifiedFull = false;
+    // Resultaat ongeldig maken als teams/players wijzigen
+    delete copy.result;
+    setReservations((prev) => prev.map((r) => (r === res ? copy : r)));
+    syncData.saveReservation(copy);
   };
 
   const removeReservation = (date: string, timeSlot: string, court: number) => {
@@ -965,6 +953,7 @@ export default function Page() {
           !(r.date === date && r.timeSlot === timeSlot && r.court === court)
       )
     );
+    syncData.deleteReservation(date, timeSlot, court);
   };
 
   /* =========================
