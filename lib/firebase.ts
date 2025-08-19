@@ -14,6 +14,7 @@ import {
   setDoc,
   writeBatch,
   deleteDoc,
+  getDocs,
   serverTimestamp,
   type DocumentData,
 } from 'firebase/firestore';
@@ -136,6 +137,14 @@ export const syncData = {
     );
   },
 
+  async clearReservations() {
+    await ensureAuth();
+    const snap = await getDocs(collReservations);
+    const batch = writeBatch(db);
+    snap.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  },
+
   // --- Availability (collection) ---
   onAvailabilityChange(cb: (data: Availability) => void) {
     return onSnapshot(collAvailability, (snap) => {
@@ -188,11 +197,7 @@ export const syncData = {
 
   async setMatchTypes(map: Record<string, MatchType>) {
     await ensureAuth();
-    await setDoc(
-      docMatchTypes,
-      { ...map, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
+    await setDoc(docMatchTypes, { ...map, updatedAt: serverTimestamp() });
   },
 
   // --- Selected date (één doc) ---

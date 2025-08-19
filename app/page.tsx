@@ -836,11 +836,12 @@ export default function Page() {
     setCategories((prev) => ({ ...prev, ...cat }));
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!isAdmin) return;
     const ok = window.confirm('Alle reservaties wissen?');
     if (!ok) return;
     setReservations([]);
+    await syncData.clearReservations();
     localStorage.setItem(RESERV_KEY, JSON.stringify([]));
     setMatchTypes({});
     setCategories({});
