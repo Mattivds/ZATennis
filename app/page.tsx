@@ -826,7 +826,12 @@ export default function Page() {
   /* =========================
      Self-join / leave (spelers)
   ========================= */
-  const joinCourt = (date: string, timeSlot: string, court: number) => {
+  const joinCourt = (
+    date: string,
+    timeSlot: string,
+    court: number,
+    second?: string
+  ) => {
     if (!session) return alert('Log in om deel te nemen.');
     const availableSet = new Set(playersAvailableFor(date, timeSlot));
     if (!availableSet.has(myName!)) {
@@ -838,6 +843,20 @@ export default function Page() {
       alert('Je staat al ingepland in dit uur.');
       return;
     }
+    if (second) {
+      if (second === myName) {
+        alert('Kies een andere speler als tweede.');
+        return;
+      }
+      if (!availableSet.has(second)) {
+        alert('Tweede speler is niet beschikbaar in dit tijdslot.');
+        return;
+      }
+      if (slotPlayers.has(second)) {
+        alert('Tweede speler staat al ingepland in dit uur.');
+        return;
+      }
+    }
 
     const existing = findReservation(date, timeSlot, court);
     const mt = getMatchType(date, timeSlot, court);
@@ -847,6 +866,7 @@ export default function Page() {
     if (!existing) {
       const arr = Array.from({ length: needed }, () => '');
       arr[0] = myName!;
+      if (second) arr[1] = second;
       const fresh: Reservation = {
         date,
         timeSlot,
@@ -878,9 +898,16 @@ export default function Page() {
       return;
     }
 
-    // Bepaal vooraf of we vol worden
     const newPlayers = [...existing.players];
     newPlayers[emptyIdx] = myName!;
+    if (second) {
+      const secondIdx = newPlayers.findIndex((p) => !p);
+      if (secondIdx === -1) {
+        alert('Geen plaats voor tweede speler.');
+        return;
+      }
+      newPlayers[secondIdx] = second;
+    }
     const willBeFull = newPlayers.every((p) => !!p);
 
     setReservations((prev) =>
@@ -898,7 +925,6 @@ export default function Page() {
       })
     );
 
-    // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
       const fullRes: Reservation = {
         ...existing,
@@ -1059,6 +1085,11 @@ export default function Page() {
     const reservation = findReservation(date, timeSlot, court);
     const matchType = getMatchType(date, timeSlot, court);
     const category = getCategory(date, timeSlot, court);
+    const [secondPlayer, setSecondPlayer] = useState('');
+    const slotPlayers = getPlayersInSlot(date, timeSlot);
+    const secondOptions = playersAvailableFor(date, timeSlot).filter(
+      (p) => p !== myName && !slotPlayers.has(p)
+    );
 
     // Kaart met bestaande reservatie
     if (reservation) {
@@ -1073,7 +1104,7 @@ export default function Page() {
         !!myName &&
         !iAmIn &&
         availableSet.has(myName) &&
-        !getPlayersInSlot(date, timeSlot).has(myName) &&
+        !slotPlayers.has(myName) &&
         reservation.players.some((p) => !p); // er is nog plek
 
       return (
@@ -1192,10 +1223,7 @@ export default function Page() {
 
     // Kaart zonder reservatie: controls bovenaan
     const availableSet = new Set(playersAvailableFor(date, timeSlot));
-    const canFirstJoin =
-      !!myName &&
-      availableSet.has(myName) &&
-      !getPlayersInSlot(date, timeSlot).has(myName);
+    const canFirstJoin = !!myName && availableSet.has(myName) && !slotPlayers.has(myName);
 
     return (
       <div className={courtClass}>
@@ -1243,9 +1271,24 @@ export default function Page() {
           Nog geen spelers
         </div>
 
-        <div className="pt-2">
+        <div className="pt-2 space-y-2">
+          <select
+            className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm"
+            value={secondPlayer}
+            onChange={(e) => setSecondPlayer(e.target.value)}
+          >
+            <option value="">-- Kies tweede speler --</option>
+            {secondOptions.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
           <button
-            onClick={() => joinCourt(date, timeSlot, court)}
+            onClick={() => {
+              joinCourt(date, timeSlot, court, secondPlayer);
+              setSecondPlayer('');
+            }}
             disabled={!canFirstJoin}
             className="w-full bg-white text-gray-800 py-2 px-3 rounded text-sm border border-gray-200 disabled:opacity-50"
             title={
