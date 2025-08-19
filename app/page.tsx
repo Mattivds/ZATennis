@@ -937,8 +937,7 @@ export default function Page() {
           players: arr,
         } as Reservation),
       };
-      _setReservations((prev) => [...prev, fresh]);
-      void syncData.saveReservation(fresh);
+      setReservations((prev) => [...prev, fresh]);
       if (fresh.notifiedFull) sendMatchFullMessages(fresh);
       return;
     }
@@ -966,10 +965,9 @@ export default function Page() {
     };
     if (willBeFull === false) delete updated.result;
 
-    _setReservations((prev) =>
+    setReservations((prev) =>
       prev.map((r) => (r === existing ? updated : r))
     );
-    void syncData.saveReservation(updated);
 
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
@@ -987,8 +985,7 @@ export default function Page() {
     copy.notifiedFull = false;
     // Resultaat ongeldig maken als teams/players wijzigen
     delete copy.result;
-    _setReservations((prev) => prev.map((r) => (r === res ? copy : r)));
-    void syncData.saveReservation(copy);
+    setReservations((prev) => prev.map((r) => (r === res ? copy : r)));
   };
 
   const removeReservation = (date: string, timeSlot: string, court: number) => {
@@ -1000,13 +997,12 @@ export default function Page() {
       'Weet je zeker dat je deze reservatie wilt verwijderen?'
     );
     if (!ok) return;
-    _setReservations((prev) =>
+    setReservations((prev) =>
       prev.filter(
         (r) =>
           !(r.date === date && r.timeSlot === timeSlot && r.court === court)
       )
     );
-    void syncData.deleteReservation(date, timeSlot, court);
   };
 
   /* =========================
