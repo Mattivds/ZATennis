@@ -938,6 +938,8 @@ export default function Page() {
         } as Reservation),
       };
       setReservations((prev) => [...prev, fresh]);
+      // Sla meteen op zodat ook een eerste singles-speler in Firestore verschijnt
+      syncData.saveReservation(fresh);
       if (fresh.notifiedFull) sendMatchFullMessages(fresh);
       return;
     }
@@ -968,6 +970,8 @@ export default function Page() {
     setReservations((prev) =>
       prev.map((r) => (r === existing ? updated : r))
     );
+    // Schrijf de wijziging zodat alle spelers de update zien
+    syncData.saveReservation(updated);
 
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
