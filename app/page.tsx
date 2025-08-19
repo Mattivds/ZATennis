@@ -9,7 +9,12 @@ import {
 } from 'react';
 import { addWeeks, format } from 'date-fns';
 import { nl } from 'date-fns/locale';
-import { syncData, type MatchCategory, type Reservation } from '@/lib/firebase';
+import {
+  syncData,
+  type MatchCategory,
+  type MatchType,
+  type Reservation,
+} from '@/lib/firebase';
 
 /* =========================
    Types
@@ -183,9 +188,20 @@ export default function Page() {
     () => Array.from({ length: 20 }, (_, i) => addWeeks(startDate, i)),
     []
   );
-  const [selectedDate, setSelectedDate] = useState<string>(
+  const [_selectedDate, _setSelectedDate] = useState<string>(
     format(sundays[0], 'yyyy-MM-dd')
   );
+  const setSelectedDate: Dispatch<SetStateAction<string>> = (updater) => {
+    _setSelectedDate((prev) => {
+      const next =
+        typeof updater === 'function'
+          ? (updater as (p: string) => string)(prev)
+          : updater;
+      syncData.setSelectedDate(next);
+      return next;
+    });
+  };
+  const selectedDate = _selectedDate;
 
   /* --- Session --- */
   const [session, setSession] = useState<UserSession | null>(null);
@@ -222,10 +238,34 @@ export default function Page() {
       return next;
     });
   };
-  const [availability, setAvailability] = useState<Availability>({});
-  const [matchTypes, setMatchTypes] = useState<
-    Record<string, 'single' | 'double'>
-  >({});
+  const [_availability, _setAvailability] = useState<Availability>({});
+  const setAvailability: Dispatch<SetStateAction<Availability>> = (updater) => {
+    _setAvailability((prev) => {
+      const next =
+        typeof updater === 'function'
+          ? (updater as (p: Availability) => Availability)(prev)
+          : updater;
+      syncData.setAvailability(next);
+      return next;
+    });
+  };
+  const availability = _availability;
+  const [_matchTypes, _setMatchTypes] = useState<Record<string, MatchType>>({});
+  const setMatchTypes: Dispatch<SetStateAction<Record<string, MatchType>>> = (
+    updater
+  ) => {
+    _setMatchTypes((prev) => {
+      const next =
+        typeof updater === 'function'
+          ? (updater as (p: Record<string, MatchType>) => Record<string, MatchType>)(
+              prev
+            )
+          : updater;
+      syncData.setMatchTypes(next);
+      return next;
+    });
+  };
+  const matchTypes = _matchTypes;
   const [categories, setCategories] = useState<Record<string, MatchCategory>>(
     {}
   );
@@ -256,13 +296,13 @@ export default function Page() {
       const r = localStorage.getItem(RESERV_KEY);
       if (r) _setReservations(JSON.parse(r));
       const a = localStorage.getItem(AVAIL_KEY);
-      if (a) setAvailability(JSON.parse(a));
+      if (a) _setAvailability(JSON.parse(a));
       const mt = localStorage.getItem(MATCHTYPE_KEY);
-      if (mt) setMatchTypes(JSON.parse(mt));
+      if (mt) _setMatchTypes(JSON.parse(mt));
       const cat = localStorage.getItem(CATEGORY_KEY);
       if (cat) setCategories(JSON.parse(cat));
       const sd = localStorage.getItem(SELECTED_DATE_KEY);
-      if (sd) setSelectedDate(sd);
+      if (sd) _setSelectedDate(sd);
       const sess = localStorage.getItem(SESSION_KEY);
       if (sess) setSession(JSON.parse(sess));
       const tab = localStorage.getItem(ACTIVE_TAB_KEY) as TabKey | null;
@@ -315,13 +355,13 @@ export default function Page() {
         if (e.key === RESERV_KEY && e.newValue)
           _setReservations(JSON.parse(e.newValue));
         if (e.key === AVAIL_KEY && e.newValue)
-          setAvailability(JSON.parse(e.newValue));
+          _setAvailability(JSON.parse(e.newValue));
         if (e.key === MATCHTYPE_KEY && e.newValue)
-          setMatchTypes(JSON.parse(e.newValue));
+          _setMatchTypes(JSON.parse(e.newValue));
         if (e.key === CATEGORY_KEY && e.newValue)
           setCategories(JSON.parse(e.newValue));
         if (e.key === SELECTED_DATE_KEY && e.newValue)
-          setSelectedDate(e.newValue);
+          _setSelectedDate(e.newValue);
         if (e.key === SESSION_KEY && e.newValue)
           setSession(JSON.parse(e.newValue));
         if (e.key === ACTIVE_TAB_KEY && e.newValue) {
@@ -347,10 +387,24 @@ export default function Page() {
 
   // Realtime updates via Firestore
   useEffect(() => {
-    const unsub = syncData.onReservationsChange((data) => {
+    const unsubRes = syncData.onReservationsChange((data) => {
       _setReservations(data);
     });
-    return unsub;
+    const unsubAvail = syncData.onAvailabilityChange((data) => {
+      _setAvailability(data);
+    });
+    const unsubMatch = syncData.onMatchTypesChange((data) => {
+      _setMatchTypes(data);
+    });
+    const unsubDate = syncData.onSelectedDateChange((d) => {
+      _setSelectedDate(d);
+    });
+    return () => {
+      unsubRes();
+      unsubAvail();
+      unsubMatch();
+      unsubDate();
+    };
   }, []);
 
   /* =========================
@@ -789,7 +843,6 @@ export default function Page() {
     setReservations([]);
     localStorage.setItem(RESERV_KEY, JSON.stringify([]));
     setMatchTypes({});
-    syncData.setMatchTypes({});
     setCategories({});
     localStorage.setItem(MATCHTYPE_KEY, JSON.stringify({}));
     localStorage.setItem(CATEGORY_KEY, JSON.stringify({}));
