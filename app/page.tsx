@@ -840,8 +840,8 @@ export default function Page() {
     if (!isAdmin) return;
     const ok = window.confirm('Alle reservaties wissen?');
     if (!ok) return;
-    setReservations([]);
     await syncData.clearReservations();
+    setReservations([]);
     localStorage.setItem(RESERV_KEY, JSON.stringify([]));
     setMatchTypes({});
     setCategories({});
@@ -939,8 +939,6 @@ export default function Page() {
         } as Reservation),
       };
       setReservations((prev) => [...prev, fresh]);
-      // Sla meteen op zodat ook een eerste singles-speler in Firestore verschijnt
-      syncData.saveReservation(fresh);
       if (fresh.notifiedFull) sendMatchFullMessages(fresh);
       return;
     }
@@ -971,8 +969,6 @@ export default function Page() {
     setReservations((prev) =>
       prev.map((r) => (r === existing ? updated : r))
     );
-    // Schrijf de wijziging zodat alle spelers de update zien
-    syncData.saveReservation(updated);
 
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
@@ -1008,6 +1004,7 @@ export default function Page() {
           !(r.date === date && r.timeSlot === timeSlot && r.court === court)
       )
     );
+    syncData.deleteReservation(date, timeSlot, court);
   };
 
   /* =========================
