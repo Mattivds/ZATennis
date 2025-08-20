@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { addWeeks, format } from 'date-fns';
 import { nl } from 'date-fns/locale';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, ensureAuth } from '@/lib/firebase';
 
 /* =========================
@@ -764,7 +764,7 @@ export default function Page() {
     setCategories((prev) => ({ ...prev, ...cat }));
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!isAdmin) return;
     const ok = window.confirm('Alle reservaties wissen?');
     if (!ok) return;
@@ -774,6 +774,10 @@ export default function Page() {
     setCategories({});
     localStorage.setItem(MATCHTYPE_KEY, JSON.stringify({}));
     localStorage.setItem(CATEGORY_KEY, JSON.stringify({}));
+
+    await ensureAuth();
+    const snap = await getDocs(collection(db, 'reservations'));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   };
 
   /* =========================
@@ -935,10 +939,10 @@ export default function Page() {
     if (!isAdmin && who !== myName) return;
     let newPlayers: string[] | null = null;
     setReservations((prev) =>
-      prev.map((r) => {
-        if (r !== res) return r;
+      prev.flatMap((r) => {
+        if (r !== res) return [r];
         const idx = r.players.findIndex((p) => p === who);
-        if (idx === -1) return r;
+        if (idx === -1) return [r];
         const copy: Reservation = { ...r, players: [...r.players] };
         copy.players[idx] = '';
         // Match is niet meer vol -> terug open, reset notifiedFull
@@ -946,17 +950,22 @@ export default function Page() {
         // Resultaat ongeldig maken als teams/players wijzigen
         delete copy.result;
         newPlayers = copy.players;
-        return copy;
+        if (copy.players.every((p) => !p)) return [];
+        return [copy];
       })
     );
     if (!newPlayers) return;
     await ensureAuth();
     const docId = `${res.date}_${res.timeSlot}_${res.court}`;
-    await setDoc(
-      doc(db, 'reservations', docId),
-      { ...res, players: newPlayers, notifiedFull: false, result: null },
-      { merge: true }
-    );
+    if (newPlayers.every((p) => !p)) {
+      await deleteDoc(doc(db, 'reservations', docId));
+    } else {
+      await setDoc(
+        doc(db, 'reservations', docId),
+        { ...res, players: newPlayers, notifiedFull: false, result: null },
+        { merge: true }
+      );
+    }
   };
 
   const removeReservation = async (
