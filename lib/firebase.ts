@@ -13,6 +13,8 @@ import {
   onSnapshot,
   setDoc,
   writeBatch,
+  deleteDoc,
+  getDocs,
   serverTimestamp,
   type DocumentData,
 } from 'firebase/firestore';
@@ -57,8 +59,15 @@ export async function ensureAuth(): Promise<User> {
    - Biedt ook listeners voor reservations & availability
    ============================================================ */
 
-type MatchType = 'single' | 'double';
-type MatchCategory = 'training' | 'wedstrijd';
+export type MatchType = 'single' | 'double';
+export type MatchCategory = 'training' | 'wedstrijd';
+
+export type ReservationResult = {
+  winner?: string;
+  loser?: string;
+  winners?: [string, string];
+  losers?: [string, string];
+};
 
 export interface Reservation {
   date: string; // yyyy-MM-dd
@@ -67,13 +76,17 @@ export interface Reservation {
   matchType: MatchType;
   category: MatchCategory;
   players: string[]; // single: [a,b], double: [x1,x2,y1,y2]
-  result?: { winner: string; loser: string } | null;
+  result?: ReservationResult;
+  notifiedFull?: boolean;
 }
 
 type Availability = Record<string, Record<string, Record<string, boolean>>>;
 
 const collReservations = collection(db, 'reservations');
 const collAvailability = collection(db, 'availability');
+
+const reservationId = (r: { date: string; timeSlot: string; court: number }) =>
+  `${r.date}_${r.timeSlot}_${r.court}`;
 
 // UI-state onder /ui/… (1 document per “helper”)
 const docMatchTypes = doc(db, 'ui', 'matchTypes'); // { [courtKey]: 'single' | 'double' }
@@ -82,38 +95,53 @@ const docSelectedDate = doc(db, 'ui', 'selectedDate'); // { value: 'yyyy-MM-dd' 
 export const syncData = {
   // --- Reservations (collection) ---
   onReservationsChange(cb: (data: Reservation[]) => void) {
-    return onSnapshot(collReservations, (snap) => {
-      const list: Reservation[] = [];
-      snap.forEach((d) => {
-        const r = d.data() as DocumentData;
-        list.push({
-          date: r.date,
-          timeSlot: r.timeSlot ?? r.time_slot,
-          court: r.court,
-          matchType: (r.matchType ?? r.match_type) as MatchType,
-          category: r.category as MatchCategory,
-          players: r.players ?? [],
-          result: r.result ?? null,
+    let unsub = () => {};
+    ensureAuth().then(() => {
+      unsub = onSnapshot(collReservations, (snap) => {
+        const list: Reservation[] = [];
+        snap.forEach((d) => {
+          const r = d.data() as DocumentData;
+          list.push({
+            date: r.date,
+            timeSlot: r.timeSlot ?? r.time_slot,
+            court: r.court,
+            matchType: (r.matchType ?? r.match_type) as MatchType,
+            category: r.category as MatchCategory,
+            players: r.players ?? [],
+            result: r.result as ReservationResult | undefined,
+            notifiedFull: r.notifiedFull,
+          });
         });
+        cb(list);
       });
-      cb(list);
     });
+    return () => unsub();
   },
 
-  async setReservations(reservations: Reservation[]) {
+  async saveReservation(r: Reservation) {
     await ensureAuth();
+    await setDoc(
+      doc(db, 'reservations', reservationId(r)),
+      {
+        ...r,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  },
+
+  async deleteReservation(date: string, timeSlot: string, court: number) {
+    await ensureAuth();
+    await deleteDoc(
+      doc(db, 'reservations', reservationId({ date, timeSlot, court }))
+    );
+  },
+
+  async clearReservations() {
+    await ensureAuth();
+    const snap = await getDocs(collReservations);
     const batch = writeBatch(db);
-    reservations.forEach((r) => {
-      const id = `${r.date}_${r.timeSlot}_${r.court}`;
-      batch.set(
-        doc(db, 'reservations', id),
-        {
-          ...r,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
+    snap.forEach((d) => batch.delete(d.ref));
     await batch.commit();
   },
 
@@ -169,11 +197,7 @@ export const syncData = {
 
   async setMatchTypes(map: Record<string, MatchType>) {
     await ensureAuth();
-    await setDoc(
-      docMatchTypes,
-      { ...map, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
+    await setDoc(docMatchTypes, { ...map, updatedAt: serverTimestamp() });
   },
 
   // --- Selected date (één doc) ---
