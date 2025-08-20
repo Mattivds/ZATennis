@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { addWeeks, format } from 'date-fns';
 import { nl } from 'date-fns/locale';
+import { collection, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { db, ensureAuth } from '@/lib/firebase';
 
 /* =========================
    Types
@@ -762,7 +764,7 @@ export default function Page() {
     setCategories((prev) => ({ ...prev, ...cat }));
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!isAdmin) return;
     const ok = window.confirm('Alle reservaties wissen?');
     if (!ok) return;
@@ -772,6 +774,10 @@ export default function Page() {
     setCategories({});
     localStorage.setItem(MATCHTYPE_KEY, JSON.stringify({}));
     localStorage.setItem(CATEGORY_KEY, JSON.stringify({}));
+
+    await ensureAuth();
+    const snap = await getDocs(collection(db, 'reservations'));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   };
 
   /* =========================
@@ -826,7 +832,7 @@ export default function Page() {
   /* =========================
      Self-join / leave (spelers)
   ========================= */
-  const joinCourt = (date: string, timeSlot: string, court: number) => {
+  const joinCourt = async (date: string, timeSlot: string, court: number) => {
     if (!session) return alert('Log in om deel te nemen.');
     const availableSet = new Set(playersAvailableFor(date, timeSlot));
     if (!availableSet.has(myName!)) {
@@ -843,6 +849,8 @@ export default function Page() {
     const mt = getMatchType(date, timeSlot, court);
     const cat = getCategory(date, timeSlot, court);
     const needed = mt === 'single' ? 2 : 4;
+
+    const docId = `${date}_${timeSlot}_${court}`;
 
     if (!existing) {
       const arr = Array.from({ length: needed }, () => '');
@@ -864,6 +872,8 @@ export default function Page() {
         } as Reservation),
       };
       setReservations((prev) => [...prev, fresh]);
+      await ensureAuth();
+      await setDoc(doc(db, 'reservations', docId), fresh, { merge: true });
       if (fresh.notifiedFull) sendMatchFullMessages(fresh);
       return;
     }
@@ -898,6 +908,20 @@ export default function Page() {
       })
     );
 
+    await ensureAuth();
+    await setDoc(
+      doc(db, 'reservations', docId),
+      {
+        ...existing,
+        players: newPlayers,
+        notifiedFull: existing.notifiedFull || willBeFull,
+        matchType: mt,
+        category: cat,
+        ...(willBeFull ? {} : { result: null }),
+      },
+      { merge: true }
+    );
+
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
       const fullRes: Reservation = {
@@ -911,25 +935,44 @@ export default function Page() {
     }
   };
 
-  const leaveCourt = (res: Reservation, who: string) => {
+  const leaveCourt = async (res: Reservation, who: string) => {
     if (!isAdmin && who !== myName) return;
+    let newPlayers: string[] | null = null;
     setReservations((prev) =>
-      prev.map((r) => {
-        if (r !== res) return r;
+      prev.flatMap((r) => {
+        if (r !== res) return [r];
         const idx = r.players.findIndex((p) => p === who);
-        if (idx === -1) return r;
+        if (idx === -1) return [r];
         const copy: Reservation = { ...r, players: [...r.players] };
         copy.players[idx] = '';
         // Match is niet meer vol -> terug open, reset notifiedFull
         copy.notifiedFull = false;
         // Resultaat ongeldig maken als teams/players wijzigen
         delete copy.result;
-        return copy;
+        newPlayers = copy.players;
+        if (copy.players.every((p) => !p)) return [];
+        return [copy];
       })
     );
+    if (!newPlayers) return;
+    await ensureAuth();
+    const docId = `${res.date}_${res.timeSlot}_${res.court}`;
+    if (newPlayers.every((p) => !p)) {
+      await deleteDoc(doc(db, 'reservations', docId));
+    } else {
+      await setDoc(
+        doc(db, 'reservations', docId),
+        { ...res, players: newPlayers, notifiedFull: false, result: null },
+        { merge: true }
+      );
+    }
   };
 
-  const removeReservation = (date: string, timeSlot: string, court: number) => {
+  const removeReservation = async (
+    date: string,
+    timeSlot: string,
+    court: number
+  ) => {
     const res = findReservation(date, timeSlot, court);
     if (!res) return;
     if (!canModifyReservation(res))
@@ -944,6 +987,9 @@ export default function Page() {
           !(r.date === date && r.timeSlot === timeSlot && r.court === court)
       )
     );
+    await ensureAuth();
+    const docId = `${date}_${timeSlot}_${court}`;
+    await deleteDoc(doc(db, 'reservations', docId));
   };
 
   /* =========================
