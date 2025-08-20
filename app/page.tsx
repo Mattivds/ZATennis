@@ -970,6 +970,10 @@ export default function Page() {
       prev.map((r) => (r === existing ? updated : r))
     );
 
+    // Zorg dat de toevoeging meteen naar Firestore wordt geschreven
+    // zodat elke speler de bijgewerkte bezetting ziet.
+    syncData.saveReservation(updated);
+
     // Stuur meldingen één keer, zonder extra setTimeout
     if (!existing.notifiedFull && willBeFull) {
       sendMatchFullMessages(updated);
