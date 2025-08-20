@@ -911,6 +911,49 @@ export default function Page() {
     }
   };
 
+  const addPlayerToReservation = (
+    res: Reservation,
+    idx: number,
+    player: string
+  ) => {
+    const availableSet = new Set(playersAvailableFor(res.date, res.timeSlot));
+    if (!availableSet.has(player)) {
+      alert('Speler is niet beschikbaar in dit tijdslot.');
+      return;
+    }
+    const slotPlayers = getPlayersInSlot(res.date, res.timeSlot);
+    if (slotPlayers.has(player)) {
+      alert('Speler is al ingepland in dit uur.');
+      return;
+    }
+
+    const newPlayers = [...res.players];
+    newPlayers[idx] = player;
+    const willBeFull = newPlayers.every((p) => !!p);
+
+    setReservations((prev) =>
+      prev.map((r) => {
+        if (r !== res) return r;
+        const copy: Reservation = {
+          ...r,
+          players: newPlayers,
+          notifiedFull: r.notifiedFull || willBeFull,
+        };
+        if (!willBeFull) delete copy.result;
+        return copy;
+      })
+    );
+
+    if (!res.notifiedFull && willBeFull) {
+      const fullRes: Reservation = {
+        ...res,
+        players: newPlayers,
+        notifiedFull: true,
+      };
+      sendMatchFullMessages(fullRes);
+    }
+  };
+
   const leaveCourt = (res: Reservation, who: string) => {
     if (!isAdmin && who !== myName) return;
     setReservations((prev) =>
@@ -1069,12 +1112,51 @@ export default function Page() {
         Array.isArray(winnerDoubles) && winnerDoubles.includes(p);
       const iAmIn = !!myName && reservation.players.includes(myName);
       const availableSet = new Set(playersAvailableFor(date, timeSlot));
+      const slotPlayers = getPlayersInSlot(date, timeSlot);
+      const availablePlayers = PLAYERS.filter(
+        (p) => availableSet.has(p) && !slotPlayers.has(p)
+      );
       const canJoin =
         !!myName &&
         !iAmIn &&
         availableSet.has(myName) &&
-        !getPlayersInSlot(date, timeSlot).has(myName) &&
+        !slotPlayers.has(myName) &&
         reservation.players.some((p) => !p); // er is nog plek
+
+      const renderSelect = (idx: number, size: 'sm' | 'md') => (
+        <select
+          className={`bg-white text-gray-900 rounded border border-gray-200 ${
+            size === 'sm' ? 'text-xs px-1.5 py-0.5' : 'text-sm px-2 py-1'
+          }`}
+          value=""
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val) addPlayerToReservation(reservation, idx, val);
+          }}
+        >
+          <option value="">Kies</option>
+          {availablePlayers.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+      );
+
+      const renderPlayer = (
+        idx: number,
+        size: 'sm' | 'md',
+        highlightFn: (n: string) => boolean
+      ) => {
+        const player = reservation.players[idx];
+        if (player)
+          return <PlayerChip name={player} size={size} highlight={highlightFn(player)} />;
+        return mayEdit ? (
+          renderSelect(idx, size)
+        ) : (
+          <span className={size === 'sm' ? 'text-xs' : 'text-sm'}>—</span>
+        );
+      };
 
       return (
         <div className={courtClass}>
@@ -1084,27 +1166,13 @@ export default function Page() {
             <>
               <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
                 <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[0] || '—'}
-                    size="md"
-                    highlight={
-                      !!reservation.players[0] &&
-                      winnerSingle === reservation.players[0]
-                    }
-                  />
+                  {renderPlayer(0, 'md', (n) => winnerSingle === n)}
                 </div>
               </div>
               <TennisNet />
               <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
                 <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[1] || '—'}
-                    size="md"
-                    highlight={
-                      !!reservation.players[1] &&
-                      winnerSingle === reservation.players[1]
-                    }
-                  />
+                  {renderPlayer(1, 'md', (n) => winnerSingle === n)}
                 </div>
               </div>
             </>
@@ -1113,20 +1181,12 @@ export default function Page() {
               <div className="space-y-1">
                 <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
                   <div className="flex items-center justify-center">
-                    <PlayerChip
-                      name={reservation.players[0] || '—'}
-                      size="sm"
-                      highlight={isWin(reservation.players[0])}
-                    />
+                    {renderPlayer(0, 'sm', isWin)}
                   </div>
                 </div>
                 <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
                   <div className="flex items-center justify-center">
-                    <PlayerChip
-                      name={reservation.players[1] || '—'}
-                      size="sm"
-                      highlight={isWin(reservation.players[1])}
-                    />
+                    {renderPlayer(1, 'sm', isWin)}
                   </div>
                 </div>
               </div>
@@ -1134,20 +1194,12 @@ export default function Page() {
               <div className="space-y-1">
                 <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
                   <div className="flex items-center justify-center">
-                    <PlayerChip
-                      name={reservation.players[2] || '—'}
-                      size="sm"
-                      highlight={isWin(reservation.players[2])}
-                    />
+                    {renderPlayer(2, 'sm', isWin)}
                   </div>
                 </div>
                 <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
                   <div className="flex items-center justify-center">
-                    <PlayerChip
-                      name={reservation.players[3] || '—'}
-                      size="sm"
-                      highlight={isWin(reservation.players[3])}
-                    />
+                    {renderPlayer(3, 'sm', isWin)}
                   </div>
                 </div>
               </div>
