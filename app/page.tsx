@@ -66,6 +66,8 @@ const PLAYERS_SCORES: Record<string, number> = {
   Thomas: 35,
   Wout: 20,
   SanderB: 75,
+  Elien: 55,
+  Jasper: 75,
 };
 const PLAYERS = Object.keys(PLAYERS_SCORES);
 
@@ -86,6 +88,8 @@ const PASSWORDS: Record<string, string> = {
   Thomas: 'Thomas2025!',
   Wout: 'Wout2025!',
   SanderB: 'SanderB2025!',
+  Elien: 'Elien2025!',
+  Jasper: 'Jasper2025!',
 };
 
 const TIME_SLOTS = [
@@ -1345,6 +1349,45 @@ export default function Page() {
   };
 
   /* =========================
+     Overzicht beschikbaarheid
+  ========================= */
+  const AvailabilityOverview = () => {
+    return (
+      <div className="bg-white rounded-xl shadow p-4 mt-6">
+        <h3 className="font-semibold text-gray-800 mb-4">
+          Beschikbare spelers per week
+        </h3>
+        <div className="space-y-4">
+          {sundays.map((d) => {
+            const dateStr = format(d, 'yyyy-MM-dd');
+            return (
+              <div key={dateStr}>
+                <h4 className="font-medium text-gray-700 mb-1">
+                  {format(d, 'eeee dd/MM', { locale: nl })}
+                </h4>
+                {TIME_SLOTS.map((slot) => {
+                  const available = PLAYERS.filter(
+                    (p) => availability?.[dateStr]?.[slot.id]?.[p] !== false
+                  );
+                  return (
+                    <div
+                      key={`${dateStr}-${slot.id}`}
+                      className="text-sm mb-1"
+                    >
+                      <span className="font-semibold">{slot.label}: </span>
+                      {available.length ? available.join(', ') : 'Niemand'}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  /* =========================
      Ladders (met medailles)
   ========================= */
   const medalFor = (rank: number) =>
@@ -1928,7 +1971,10 @@ export default function Page() {
 
         {/* Tab: Beschikbaarheid */}
         {activeTab === 'beschikbaarheid' && (
-          <MyAvailability playerName={myName!} />
+          <>
+            <MyAvailability playerName={myName!} />
+            <AvailabilityOverview />
+          </>
         )}
 
         {/* Tab: Ladders */}

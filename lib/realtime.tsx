@@ -62,6 +62,8 @@ const PLAYERS_SCORES: Record<string, number> = {
   Thomas: 35,
   Wout: 20,
   SanderB: 75,
+  Elien: 55,
+  Jasper: 75,
 };
 
 const PLAYERS = Object.keys(PLAYERS_SCORES);
