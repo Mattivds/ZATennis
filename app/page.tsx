@@ -1197,7 +1197,7 @@ export default function Page() {
                   <option value="">—</option>
                   {optionsTop.map((p) => (
                     <option key={p} value={p}>
-                      {p}
+                      {p} ({scoreOf(p)})
                     </option>
                   ))}
                 </select>
@@ -1221,7 +1221,7 @@ export default function Page() {
                   <option value="">—</option>
                   {optionsBottom.map((p) => (
                     <option key={p} value={p}>
-                      {p}
+                      {p} ({scoreOf(p)})
                     </option>
                   ))}
                 </select>
@@ -1376,7 +1376,7 @@ export default function Page() {
                 <option value="">Selecteer speler</option>
                 {optionsTop.map((p) => (
                   <option key={p} value={p}>
-                    {p}
+                    {p} ({scoreOf(p)})
                   </option>
                 ))}
               </select>
@@ -1394,7 +1394,7 @@ export default function Page() {
                 <option value="">Selecteer speler</option>
                 {optionsBottom.map((p) => (
                   <option key={p} value={p}>
-                    {p}
+                    {p} ({scoreOf(p)})
                   </option>
                 ))}
               </select>
@@ -1919,7 +1919,7 @@ export default function Page() {
             >
               {PLAYERS.map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {p} ({scoreOf(p)})
                 </option>
               ))}
             </select>
