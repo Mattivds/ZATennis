@@ -911,6 +911,89 @@ export default function Page() {
     }
   };
 
+  const setPlayerFor = (
+    date: string,
+    timeSlot: string,
+    court: number,
+    idx: number,
+    player: string
+  ) => {
+    if (!session) return alert('Log in om spelers te selecteren.');
+    const availableSet = new Set(playersAvailableFor(date, timeSlot));
+    if (player && !availableSet.has(player)) {
+      alert('Speler niet beschikbaar in dit tijdslot.');
+      return;
+    }
+    const slotPlayers = getPlayersInSlot(date, timeSlot);
+    const existing = findReservation(date, timeSlot, court);
+    const currentPlayers = existing?.players.slice() || ['', ''];
+    currentPlayers.forEach((p) => slotPlayers.delete(p));
+    if (player && slotPlayers.has(player)) {
+      alert('Speler is al ingepland in dit uur.');
+      return;
+    }
+    if (
+      existing &&
+      existing.players[idx] &&
+      existing.players[idx] !== player &&
+      !isAdmin &&
+      existing.players[idx] !== myName
+    ) {
+      alert('Je kan enkel je eigen wedstrijden wijzigen (of admin).');
+      return;
+    }
+    const newPlayers = existing ? [...existing.players] : ['', ''];
+    newPlayers[idx] = player;
+    if (!existing) {
+      const mt = getMatchType(date, timeSlot, court);
+      const cat = getCategory(date, timeSlot, court);
+      const fresh: Reservation = {
+        date,
+        timeSlot,
+        court,
+        matchType: mt,
+        category: cat,
+        players: newPlayers,
+        notifiedFull: isReservationFull({
+          date,
+          timeSlot,
+          court,
+          matchType: mt,
+          category: cat,
+          players: newPlayers,
+        } as Reservation),
+      };
+      setReservations((prev) => [...prev, fresh]);
+      if (fresh.notifiedFull) sendMatchFullMessages(fresh);
+      return;
+    }
+    const willBeFull = newPlayers.every((p) => !!p);
+    if (newPlayers.every((p) => !p)) {
+      setReservations((prev) => prev.filter((r) => r !== existing));
+      return;
+    }
+    setReservations((prev) =>
+      prev.map((r) => {
+        if (r !== existing) return r;
+        const copy: Reservation = {
+          ...r,
+          players: newPlayers,
+          notifiedFull: r.notifiedFull || willBeFull,
+        };
+        if (!willBeFull) delete copy.result;
+        return copy;
+      })
+    );
+    if (!existing.notifiedFull && willBeFull) {
+      const fullRes: Reservation = {
+        ...existing,
+        players: newPlayers,
+        notifiedFull: true,
+      };
+      sendMatchFullMessages(fullRes);
+    }
+  };
+
   const leaveCourt = (res: Reservation, who: string) => {
     if (!isAdmin && who !== myName) return;
     setReservations((prev) =>
@@ -1058,6 +1141,7 @@ export default function Page() {
   }) => {
     const reservation = findReservation(date, timeSlot, court);
     const matchType = getMatchType(date, timeSlot, court);
+    const isSingle = matchType === 'single';
     const category = getCategory(date, timeSlot, court);
 
     // Kaart met bestaande reservatie
@@ -1075,6 +1159,19 @@ export default function Page() {
         availableSet.has(myName) &&
         !getPlayersInSlot(date, timeSlot).has(myName) &&
         reservation.players.some((p) => !p); // er is nog plek
+      const [p1, p2] = reservation.players;
+      const slotPlayers = getPlayersInSlot(date, timeSlot);
+      if (p1) slotPlayers.delete(p1);
+      if (p2) slotPlayers.delete(p2);
+      const availablePlayers = playersAvailableFor(date, timeSlot);
+      const optionsTop = availablePlayers.filter(
+        (p) => p === p1 || (!slotPlayers.has(p) && p !== p2)
+      );
+      const optionsBottom = availablePlayers.filter(
+        (p) => p === p2 || (!slotPlayers.has(p) && p !== p1)
+      );
+      const mayEditTop = isAdmin || !p1 || p1 === myName;
+      const mayEditBottom = isAdmin || !p2 || p2 === myName;
 
       return (
         <div className={courtClass}>
@@ -1082,30 +1179,52 @@ export default function Page() {
 
           {reservation.matchType === 'single' ? (
             <>
-              <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
-                <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[0] || '—'}
-                    size="md"
-                    highlight={
-                      !!reservation.players[0] &&
-                      winnerSingle === reservation.players[0]
-                    }
-                  />
-                </div>
+              <div
+                className={`bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold ${
+                  winnerSingle === p1
+                    ? 'ring-2 ring-green-300 border-green-400'
+                    : ''
+                }`}
+              >
+                <select
+                  className="bg-blue-600 text-center w-full font-semibold"
+                  value={p1}
+                  onChange={(e) =>
+                    setPlayerFor(date, timeSlot, court, 0, e.target.value)
+                  }
+                  disabled={!session || !mayEditTop}
+                >
+                  <option value="">—</option>
+                  {optionsTop.map((p) => (
+                    <option key={p} value={p}>
+                      {p} ({scoreOf(p)})
+                    </option>
+                  ))}
+                </select>
               </div>
               <TennisNet />
-              <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
-                <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[1] || '—'}
-                    size="md"
-                    highlight={
-                      !!reservation.players[1] &&
-                      winnerSingle === reservation.players[1]
-                    }
-                  />
-                </div>
+              <div
+                className={`bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold ${
+                  winnerSingle === p2
+                    ? 'ring-2 ring-green-300 border-green-400'
+                    : ''
+                }`}
+              >
+                <select
+                  className="bg-blue-600 text-center w-full font-semibold"
+                  value={p2}
+                  onChange={(e) =>
+                    setPlayerFor(date, timeSlot, court, 1, e.target.value)
+                  }
+                  disabled={!session || !mayEditBottom}
+                >
+                  <option value="">—</option>
+                  {optionsBottom.map((p) => (
+                    <option key={p} value={p}>
+                      {p} ({scoreOf(p)})
+                    </option>
+                  ))}
+                </select>
               </div>
             </>
           ) : (
@@ -1197,13 +1316,101 @@ export default function Page() {
       availableSet.has(myName) &&
       !getPlayersInSlot(date, timeSlot).has(myName);
 
+    if (isSingle) {
+      const availablePlayers = playersAvailableFor(date, timeSlot);
+      const slotPlayers = getPlayersInSlot(date, timeSlot);
+      const optionsTop = availablePlayers.filter((p) => !slotPlayers.has(p));
+      const optionsBottom = optionsTop;
+      return (
+        <div className={courtClass}>
+          <div className="flex justify-center gap-2 mb-2">
+            <button
+              onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
+              className={`px-3 py-1 rounded text-sm font-bold ${
+                isSingle
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-800'
+              }`}
+            >
+              👤👤
+            </button>
+            <button
+              onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
+              className={`px-3 py-1 rounded text-sm font-bold ${
+                !isSingle
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-800'
+              }`}
+            >
+              👥👥
+            </button>
+            <select
+              // *** Zichtbaar op mobiel: altijd donkere tekst op witte achtergrond
+              className="px-2 py-1 rounded text-sm bg-white text-gray-900 border border-gray-300"
+              value={getCategory(date, timeSlot, court)}
+              onChange={(e) =>
+                setCategoryFor(
+                  date,
+                  timeSlot,
+                  court,
+                  e.target.value as MatchCategory
+                )
+              }
+              title="Type"
+            >
+              <option value="training">Training</option>
+              <option value="wedstrijd">Wedstrijd</option>
+            </select>
+          </div>
+
+          <div>
+            <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
+              <select
+                className="bg-blue-600 text-center w-full font-semibold"
+                value=""
+                onChange={(e) =>
+                  setPlayerFor(date, timeSlot, court, 0, e.target.value)
+                }
+                disabled={!session}
+              >
+                <option value="">Selecteer speler</option>
+                {optionsTop.map((p) => (
+                  <option key={p} value={p}>
+                    {p} ({scoreOf(p)})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <TennisNet />
+            <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
+              <select
+                className="bg-blue-600 text-center w-full font-semibold"
+                value=""
+                onChange={(e) =>
+                  setPlayerFor(date, timeSlot, court, 1, e.target.value)
+                }
+                disabled={!session}
+              >
+                <option value="">Selecteer speler</option>
+                {optionsBottom.map((p) => (
+                  <option key={p} value={p}>
+                    {p} ({scoreOf(p)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={courtClass}>
         <div className="flex justify-center gap-2 mb-2">
           <button
             onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
             className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'single'
+              isSingle
                 ? 'bg-blue-600 text-white'
                 : 'bg-white text-gray-800'
             }`}
@@ -1213,7 +1420,7 @@ export default function Page() {
           <button
             onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
             className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'double'
+              !isSingle
                 ? 'bg-blue-600 text-white'
                 : 'bg-white text-gray-800'
             }`}
@@ -1712,7 +1919,7 @@ export default function Page() {
             >
               {PLAYERS.map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {p} ({scoreOf(p)})
                 </option>
               ))}
             </select>
