@@ -1141,6 +1141,7 @@ export default function Page() {
   }) => {
     const reservation = findReservation(date, timeSlot, court);
     const matchType = getMatchType(date, timeSlot, court);
+    const isSingle = matchType === 'single';
     const category = getCategory(date, timeSlot, court);
 
     // Kaart met bestaande reservatie
@@ -1315,7 +1316,7 @@ export default function Page() {
       availableSet.has(myName) &&
       !getPlayersInSlot(date, timeSlot).has(myName);
 
-    if (matchType === 'single') {
+    if (isSingle) {
       const availablePlayers = playersAvailableFor(date, timeSlot);
       const slotPlayers = getPlayersInSlot(date, timeSlot);
       const optionsTop = availablePlayers.filter((p) => !slotPlayers.has(p));
@@ -1326,7 +1327,7 @@ export default function Page() {
             <button
               onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
               className={`px-3 py-1 rounded text-sm font-bold ${
-                matchType === 'single'
+                isSingle
                   ? 'bg-blue-600 text-white'
                   : 'bg-white text-gray-800'
               }`}
@@ -1336,7 +1337,7 @@ export default function Page() {
             <button
               onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
               className={`px-3 py-1 rounded text-sm font-bold ${
-                matchType === 'double'
+                !isSingle
                   ? 'bg-blue-600 text-white'
                   : 'bg-white text-gray-800'
               }`}
@@ -1409,7 +1410,7 @@ export default function Page() {
           <button
             onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
             className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'single'
+              isSingle
                 ? 'bg-blue-600 text-white'
                 : 'bg-white text-gray-800'
             }`}
@@ -1419,7 +1420,7 @@ export default function Page() {
           <button
             onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
             className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'double'
+              !isSingle
                 ? 'bg-blue-600 text-white'
                 : 'bg-white text-gray-800'
             }`}
