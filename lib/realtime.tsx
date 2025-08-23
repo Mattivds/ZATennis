@@ -26,7 +26,8 @@ import { db, ensureAuth } from '@/lib/firebase';
 ========================= */
 type MatchCategory = 'training' | 'wedstrijd';
 
-type MatchType = 'single' | 'double';
+// Alleen enkelwedstrijden worden ondersteund
+type MatchType = 'single';
 
 interface Reservation {
   date: string; // yyyy-MM-dd
@@ -34,8 +35,8 @@ interface Reservation {
   court: number; // 1..3
   matchType: MatchType;
   category: MatchCategory; // training | wedstrijd
-  players: string[]; // single: [a,b], double: [x1,x2,y1,y2]
-  result?: { winner: string; loser: string } | null; // uitslag (alleen single + wedstrijd)
+  players: string[]; // [spelerA, spelerB]
+  result?: { winner: string; loser: string } | null; // uitslag (enkel bij single-wedstrijd)
 }
 
 type Availability = Record<string, Record<string, Record<string, boolean>>>;
@@ -79,21 +80,6 @@ const ADMIN_PASSWORD = 'ZAT2025*';
 ========================= */
 const scoreOf = (name: string) => PLAYERS_SCORES[name] ?? 0;
 const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
-
-function combinations4<T>(arr: T[]): Array<[T, T, T, T]> {
-  const res: Array<[T, T, T, T]> = [];
-  const n = arr.length;
-  for (let i = 0; i < n - 3; i++) {
-    for (let j = i + 1; j < n - 2; j++) {
-      for (let k = j + 1; k < n - 1; k++) {
-        for (let l = k + 1; l < n; l++) {
-          res.push([arr[i], arr[j], arr[k], arr[l]]);
-        }
-      }
-    }
-  }
-  return res;
-}
 
 /* =========================
    Storage keys (optioneel, voor UX/offline)
@@ -451,7 +437,7 @@ export default function Page() {
     player: string
   ) => {
     const key = getCourtKey(date, timeSlot, court);
-    const maxPlayers = getMatchType(date, timeSlot, court) === 'single' ? 2 : 4;
+    const maxPlayers = 2;
     setSelectedPlayers((prev) => {
       const arr = [...(prev[key] || [])];
       while (arr.length < maxPlayers) arr.push('');
@@ -470,7 +456,7 @@ export default function Page() {
     const playersData = (selectedPlayers[key] || []).filter(Boolean);
     const matchType = getMatchType(date, timeSlot, court);
     const category = getCategory(date, timeSlot, court);
-    const requiredPlayers = matchType === 'single' ? 2 : 4;
+    const requiredPlayers = 2;
 
     if (playersData.length !== requiredPlayers) {
       alert(`Selecteer alle ${requiredPlayers} spelers voor dit terrein`);
@@ -570,30 +556,23 @@ export default function Page() {
   /* --- Planner (admin) --- */
   const buildCounts = (excludingDate?: string) => {
     const opponentCount: Record<string, number> = {};
+    const playerCount: Record<string, number> = {};
     reservations.forEach((r) => {
       if (excludingDate && r.date === excludingDate) return;
-      if (r.matchType === 'single') {
-        const [a, b] = r.players;
-        opponentCount[pairKey(a, b)] = (opponentCount[pairKey(a, b)] || 0) + 1;
-      } else {
-        const [x1, x2, y1, y2] = r.players;
-        [
-          [x1, y1],
-          [x1, y2],
-          [x2, y1],
-          [x2, y2],
-        ].forEach(([a, b]) => {
-          const k = pairKey(a, b);
-          opponentCount[k] = (opponentCount[k] || 0) + 1;
-        });
-      }
+      r.players.forEach((p) => {
+        playerCount[p] = (playerCount[p] || 0) + 1;
+      });
+      const [a, b] = r.players;
+      opponentCount[pairKey(a, b)] =
+        (opponentCount[pairKey(a, b)] || 0) + 1;
     });
-    return { opponentCount };
+    return { opponentCount, playerCount };
   };
 
   const planAllBalanced = async () => {
     if (!isAdmin) return;
-    const { opponentCount } = buildCounts();
+    const { opponentCount, playerCount } = buildCounts();
+    PLAYERS.forEach((p) => (playerCount[p] = playerCount[p] || 0));
     const result: Reservation[] = [];
 
     const hours = sundays.flatMap((d) =>
@@ -605,23 +584,36 @@ export default function Page() {
 
     const oppSeen = (a: string, b: string) => opponentCount[pairKey(a, b)] || 0;
 
-    hours.forEach((hr, hourIdx) => {
-      const groups = hourIdx % 2 === 0 ? [4, 4, 2] : [4, 2, 2];
+    hours.forEach((hr) => {
+      const groups = [2, 2, 2];
       const used = new Set<string>();
       const available = new Set(playersAvailableFor(hr.dateStr, hr.slotId));
 
       const pickSingles = (): [string, string] | null => {
         const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
         if (cand.length < 2) return null;
-        const sorted = cand.slice().sort((a, b) => scoreOf(a) - scoreOf(b));
+        const sorted = cand
+          .slice()
+          .sort(
+            (a, b) =>
+              (playerCount[a] || 0) - (playerCount[b] || 0) ||
+              scoreOf(a) - scoreOf(b)
+          );
         let best: [string, string] | null = null;
         let bestScore = Infinity;
         for (let i = 0; i < sorted.length - 1; i++) {
           for (let j = i + 1; j < sorted.length; j++) {
             const a = sorted[i],
               b = sorted[j];
-            const diff = Math.abs(scoreOf(a) - scoreOf(b));
-            const s = diff * 12 + oppSeen(a, b) * 60 + Math.random() * 0.5;
+            const diffScore = Math.abs(scoreOf(a) - scoreOf(b));
+            const diffCount = Math.abs(
+              (playerCount[a] || 0) - (playerCount[b] || 0)
+            );
+            const s =
+              diffCount * 1000 +
+              diffScore * 12 +
+              oppSeen(a, b) * 60 +
+              Math.random() * 0.5;
             if (s < bestScore) {
               bestScore = s;
               best = [a, b];
@@ -631,83 +623,23 @@ export default function Page() {
         return best;
       };
 
-      const pickDoubles = () => {
-        const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
-        if (cand.length < 4) return null;
-        let best: { teamA: [string, string]; teamB: [string, string] } | null =
-          null;
-        let bestScore = Infinity;
-
-        for (const [a, b, c, d] of combinations4(cand)) {
-          const splits: Array<[[string, string], [string, string]]> = [
-            [
-              [a, b],
-              [c, d],
-            ],
-            [
-              [a, c],
-              [b, d],
-            ],
-            [
-              [a, d],
-              [b, c],
-            ],
-          ];
-          for (const [t1, t2] of splits) {
-            const [x1, x2] = t1,
-              [y1, y2] = t2;
-            const sumA = scoreOf(x1) + scoreOf(x2);
-            const sumB = scoreOf(y1) + scoreOf(y2);
-            const sumDiff = Math.abs(sumA - sumB);
-            let s = 0;
-            s += sumDiff * 15;
-            s +=
-              oppSeen(x1, y1) +
-              oppSeen(x1, y2) +
-              oppSeen(x2, y1) +
-              oppSeen(x2, y2);
-            s += Math.random() * 0.5;
-            if (s < bestScore) {
-              bestScore = s;
-              best = { teamA: [x1, x2], teamB: [y1, y2] };
-            }
-          }
-        }
-        return best;
-      };
-
-      groups.forEach((size, idxInHour) => {
+      groups.forEach((_, idxInHour) => {
         const court = idxInHour + 1;
-        if (size === 2) {
-          const pair = pickSingles();
-          if (!pair) return;
-          const [a, b] = pair;
-          used.add(a);
-          used.add(b);
-          result.push({
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'single',
-            category: 'wedstrijd',
-            players: [a, b],
-          });
-        } else {
-          const grp = pickDoubles();
-          if (!grp) return;
-          const { teamA, teamB } = grp;
-          const [x1, x2] = teamA,
-            [y1, y2] = teamB;
-          [x1, x2, y1, y2].forEach((p) => used.add(p));
-          result.push({
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'double',
-            category: 'training',
-            players: [x1, x2, y1, y2],
-          });
-        }
+        const pair = pickSingles();
+        if (!pair) return;
+        const [a, b] = pair;
+        used.add(a);
+        used.add(b);
+        playerCount[a] = (playerCount[a] || 0) + 1;
+        playerCount[b] = (playerCount[b] || 0) + 1;
+        result.push({
+          date: hr.dateStr,
+          timeSlot: hr.slotId,
+          court,
+          matchType: 'single',
+          category: 'wedstrijd',
+          players: [a, b],
+        });
       });
     });
 
@@ -738,7 +670,8 @@ export default function Page() {
     if (!isAdmin) return;
     const dateStr = selectedDate;
 
-    const { opponentCount } = buildCounts(dateStr);
+    const { opponentCount, playerCount } = buildCounts(dateStr);
+    PLAYERS.forEach((p) => (playerCount[p] = playerCount[p] || 0));
     const hours = TIME_SLOTS.map((slot) => ({
       dateStr,
       slotId: slot.id,
@@ -746,23 +679,36 @@ export default function Page() {
     const result: Reservation[] = [];
     const oppSeen = (a: string, b: string) => opponentCount[pairKey(a, b)] || 0;
 
-    hours.forEach((hr, hourIdx) => {
-      const groups = hourIdx % 2 === 0 ? [4, 4, 2] : [4, 2, 2];
+    hours.forEach((hr) => {
+      const groups = [2, 2, 2];
       const used = new Set<string>();
       const available = new Set(playersAvailableFor(hr.dateStr, hr.slotId));
 
       const pickSingles = (): [string, string] | null => {
         const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
         if (cand.length < 2) return null;
-        const sorted = cand.slice().sort((a, b) => scoreOf(a) - scoreOf(b));
+        const sorted = cand
+          .slice()
+          .sort(
+            (a, b) =>
+              (playerCount[a] || 0) - (playerCount[b] || 0) ||
+              scoreOf(a) - scoreOf(b)
+          );
         let best: [string, string] | null = null;
         let bestScore = Infinity;
         for (let i = 0; i < sorted.length - 1; i++) {
           for (let j = i + 1; j < sorted.length; j++) {
             const a = sorted[i],
               b = sorted[j];
-            const diff = Math.abs(scoreOf(a) - scoreOf(b));
-            const s = diff * 12 + oppSeen(a, b) * 60 + Math.random() * 0.5;
+            const diffScore = Math.abs(scoreOf(a) - scoreOf(b));
+            const diffCount = Math.abs(
+              (playerCount[a] || 0) - (playerCount[b] || 0)
+            );
+            const s =
+              diffCount * 1000 +
+              diffScore * 12 +
+              oppSeen(a, b) * 60 +
+              Math.random() * 0.5;
             if (s < bestScore) {
               bestScore = s;
               best = [a, b];
@@ -772,83 +718,23 @@ export default function Page() {
         return best;
       };
 
-      const pickDoubles = () => {
-        const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
-        if (cand.length < 4) return null;
-        let best: { teamA: [string, string]; teamB: [string, string] } | null =
-          null;
-        let bestScore = Infinity;
-
-        for (const [a, b, c, d] of combinations4(cand)) {
-          const splits: Array<[[string, string], [string, string]]> = [
-            [
-              [a, b],
-              [c, d],
-            ],
-            [
-              [a, c],
-              [b, d],
-            ],
-            [
-              [a, d],
-              [b, c],
-            ],
-          ];
-          for (const [t1, t2] of splits) {
-            const [x1, x2] = t1,
-              [y1, y2] = t2;
-            const sumA = scoreOf(x1) + scoreOf(x2);
-            const sumB = scoreOf(y1) + scoreOf(y2);
-            const sumDiff = Math.abs(sumA - sumB);
-            let s = 0;
-            s += sumDiff * 15;
-            s +=
-              oppSeen(x1, y1) +
-              oppSeen(x1, y2) +
-              oppSeen(x2, y1) +
-              oppSeen(x2, y2);
-            s += Math.random() * 0.5;
-            if (s < bestScore) {
-              bestScore = s;
-              best = { teamA: [x1, x2], teamB: [y1, y2] };
-            }
-          }
-        }
-        return best;
-      };
-
-      groups.forEach((size, idxInHour) => {
+      groups.forEach((_, idxInHour) => {
         const court = idxInHour + 1;
-        if (size === 2) {
-          const pair = pickSingles();
-          if (!pair) return;
-          const [a, b] = pair;
-          used.add(a);
-          used.add(b);
-          result.push({
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'single',
-            category: 'wedstrijd',
-            players: [a, b],
-          });
-        } else {
-          const grp = pickDoubles();
-          if (!grp) return;
-          const { teamA, teamB } = grp;
-          const [x1, x2] = teamA,
-            [y1, y2] = teamB;
-          [x1, x2, y1, y2].forEach((p) => used.add(p));
-          result.push({
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'double',
-            category: 'training',
-            players: [x1, x2, y1, y2],
-          });
-        }
+        const pair = pickSingles();
+        if (!pair) return;
+        const [a, b] = pair;
+        used.add(a);
+        used.add(b);
+        playerCount[a] = (playerCount[a] || 0) + 1;
+        playerCount[b] = (playerCount[b] || 0) + 1;
+        result.push({
+          date: hr.dateStr,
+          timeSlot: hr.slotId,
+          court,
+          matchType: 'single',
+          category: 'wedstrijd',
+          players: [a, b],
+        });
       });
     });
 
@@ -899,7 +785,7 @@ export default function Page() {
   const ReservationBadge = ({ r }: { r: Reservation }) => (
     <div className="absolute top-1 left-1 flex gap-1">
       <div className="bg-white rounded-full px-2 py-1 text-[10px] font-bold">
-        {r.matchType === 'single' ? '👤👤' : '👥👥'}
+        👤👤
       </div>
       <div
         className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
@@ -940,7 +826,6 @@ export default function Page() {
       const mayEdit = canModifyReservation(reservation);
       const canMarkWinner =
         reservation.category === 'wedstrijd' &&
-        reservation.matchType === 'single' &&
         (!reservation.result || (reservation.result && isAdmin));
 
       const winner = reservation.result?.winner ?? undefined;
@@ -965,57 +850,27 @@ export default function Page() {
         <div className={courtClass}>
           <ReservationBadge r={reservation} />
 
-          {reservation.matchType === 'single' ? (
-            <>
-              <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
-                <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[0]}
-                    size="md"
-                    highlight={winner === reservation.players[0]}
-                  />
-                </div>
+          <>
+            <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
+              <div className="flex items-center justify-center">
+                <PlayerChip
+                  name={reservation.players[0]}
+                  size="md"
+                  highlight={winner === reservation.players[0]}
+                />
               </div>
-              <TennisNet />
-              <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
-                <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[1]}
-                    size="md"
-                    highlight={winner === reservation.players[1]}
-                  />
-                </div>
+            </div>
+            <TennisNet />
+            <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
+              <div className="flex items-center justify-center">
+                <PlayerChip
+                  name={reservation.players[1]}
+                  size="md"
+                  highlight={winner === reservation.players[1]}
+                />
               </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-1">
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[0]} size="sm" />
-                  </div>
-                </div>
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[1]} size="sm" />
-                  </div>
-                </div>
-              </div>
-              <TennisNet />
-              <div className="space-y-1">
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[2]} size="sm" />
-                  </div>
-                </div>
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[3]} size="sm" />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+            </div>
+          </>
 
           {mayEdit && (
             <button
@@ -1038,23 +893,9 @@ export default function Page() {
         <div className="flex justify-center gap-2 mb-2">
           <button
             onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
-            className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'single'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700'
-            }`}
+            className="px-3 py-1 rounded text-sm font-bold bg-blue-600 text-white"
           >
             👤👤
-          </button>
-          <button
-            onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
-            className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'double'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700'
-            }`}
-          >
-            👥👥
           </button>
           <select
             className="px-2 py-1 rounded text-sm bg-white border border-gray-300"
@@ -1074,7 +915,7 @@ export default function Page() {
           </select>
         </div>
 
-        {Array.from({ length: matchType === 'single' ? 2 : 4 }).map(
+        {Array.from({ length: 2 }).map(
           (_, idx) => (
             <div key={`sel-${idx}`}>
               <select
@@ -1091,9 +932,7 @@ export default function Page() {
                   </option>
                 ))}
               </select>
-              {(matchType === 'single' ? idx === 0 : idx === 1) && (
-                <TennisNet />
-              )}
+              {idx === 0 && <TennisNet />}
             </div>
           )
         )}
@@ -1101,8 +940,7 @@ export default function Page() {
         <button
           onClick={() => handleReservation(date, timeSlot, court)}
           disabled={
-            (selectedPlayers[key] || []).filter(Boolean).length !==
-              (matchType === 'single' ? 2 : 4) ||
+            (selectedPlayers[key] || []).filter(Boolean).length !== 2 ||
             (selectedPlayers[key] || []).some((p) => !p)
           }
           className="w-full bg-blue-600 text-white py-2 px-3 rounded text-sm disabled:opacity-50"

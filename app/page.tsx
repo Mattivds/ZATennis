@@ -99,21 +99,6 @@ const TIME_SLOTS = [
 const scoreOf = (name: string) => PLAYERS_SCORES[name] ?? 0;
 const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
-function combinations4<T>(arr: T[]): Array<[T, T, T, T]> {
-  const res: Array<[T, T, T, T]> = [];
-  const n = arr.length;
-  for (let i = 0; i < n - 3; i++) {
-    for (let j = i + 1; j < n - 2; j++) {
-      for (let k = j + 1; k < n - 1; k++) {
-        for (let l = k + 1; l < n; l++) {
-          res.push([arr[i], arr[j], arr[k], arr[l]]);
-        }
-      }
-    }
-  }
-  return res;
-}
-
 /* =========================
    Storage keys
 ========================= */
@@ -466,10 +451,15 @@ export default function Page() {
   ========================= */
   const buildCounts = (excludingDate?: string) => {
     const opponentCount: Record<string, number> = {};
+    const playerCount: Record<string, number> = {};
     reservations.forEach((r) => {
       if (excludingDate && r.date === excludingDate) return;
+      r.players.forEach((p) => {
+        if (!p) return;
+        playerCount[p] = (playerCount[p] || 0) + 1;
+      });
       if (r.matchType === 'single') {
-        const [a, b] = r.players.filter(Boolean);
+        const [a, b] = r.players;
         if (!a || !b) return;
         opponentCount[pairKey(a, b)] = (opponentCount[pairKey(a, b)] || 0) + 1;
       } else {
@@ -486,12 +476,13 @@ export default function Page() {
         });
       }
     });
-    return { opponentCount };
+    return { opponentCount, playerCount };
   };
 
   const planAllBalanced = () => {
     if (!isAdmin) return;
-    const { opponentCount } = buildCounts();
+    const { opponentCount, playerCount } = buildCounts();
+    PLAYERS.forEach((p) => (playerCount[p] = playerCount[p] || 0));
     const result: Reservation[] = [];
     const mt: Record<string, 'single' | 'double'> = {};
     const cat: Record<string, MatchCategory> = {};
@@ -505,23 +496,36 @@ export default function Page() {
 
     const oppSeen = (a: string, b: string) => opponentCount[pairKey(a, b)] || 0;
 
-    hours.forEach((hr, hourIdx) => {
-      const groups = hourIdx % 2 === 0 ? [4, 4, 2] : [4, 2, 2];
+    hours.forEach((hr) => {
+      const groups = [2, 2, 2];
       const used = new Set<string>();
       const available = new Set(playersAvailableFor(hr.dateStr, hr.slotId));
 
       const pickSingles = (): [string, string] | null => {
         const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
         if (cand.length < 2) return null;
-        const sorted = cand.slice().sort((a, b) => scoreOf(a) - scoreOf(b));
+        const sorted = cand
+          .slice()
+          .sort(
+            (a, b) =>
+              (playerCount[a] || 0) - (playerCount[b] || 0) ||
+              scoreOf(a) - scoreOf(b)
+          );
         let best: [string, string] | null = null;
         let bestScore = Infinity;
         for (let i = 0; i < sorted.length - 1; i++) {
           for (let j = i + 1; j < sorted.length; j++) {
             const a = sorted[i],
               b = sorted[j];
-            const diff = Math.abs(scoreOf(a) - scoreOf(b));
-            const s = diff * 12 + oppSeen(a, b) * 60 + Math.random() * 0.5;
+            const diffScore = Math.abs(scoreOf(a) - scoreOf(b));
+            const diffCount = Math.abs(
+              (playerCount[a] || 0) - (playerCount[b] || 0)
+            );
+            const s =
+              diffCount * 1000 +
+              diffScore * 12 +
+              oppSeen(a, b) * 60 +
+              Math.random() * 0.5;
             if (s < bestScore) {
               bestScore = s;
               best = [a, b];
@@ -531,93 +535,28 @@ export default function Page() {
         return best;
       };
 
-      const pickDoubles = () => {
-        const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
-        if (cand.length < 4) return null;
-        let best: { teamA: [string, string]; teamB: [string, string] } | null =
-          null;
-        let bestScore = Infinity;
-
-        for (const [a, b, c, d] of combinations4(cand)) {
-          const splits: Array<[[string, string], [string, string]]> = [
-            [
-              [a, b],
-              [c, d],
-            ],
-            [
-              [a, c],
-              [b, d],
-            ],
-            [
-              [a, d],
-              [b, c],
-            ],
-          ];
-          for (const [t1, t2] of splits) {
-            const [x1, x2] = t1,
-              [y1, y2] = t2;
-            const sumA = scoreOf(x1) + scoreOf(x2);
-            const sumB = scoreOf(y1) + scoreOf(y2);
-            const sumDiff = Math.abs(sumA - sumB);
-            let s = 0;
-            s += sumDiff * 15;
-            s +=
-              oppSeen(x1, y1) +
-              oppSeen(x1, y2) +
-              oppSeen(x2, y1) +
-              oppSeen(x2, y2);
-            s += Math.random() * 0.5;
-            if (s < bestScore) {
-              bestScore = s;
-              best = { teamA: [x1, x2], teamB: [y1, y2] };
-            }
-          }
-        }
-        return best;
-      };
-
-      groups.forEach((size, idxInHour) => {
+      groups.forEach((_, idxInHour) => {
         const court = idxInHour + 1;
-        if (size === 2) {
-          const pair = pickSingles();
-          if (!pair) return;
-          const [a, b] = pair;
-          used.add(a);
-          used.add(b);
-          const res: Reservation = {
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'single',
-            category: 'wedstrijd',
-            players: [a, b],
-            notifiedFull: true,
-          };
-          result.push(res);
-          sendMatchFullMessages(res);
-          mt[getCourtKey(hr.dateStr, hr.slotId, court)] = 'single';
-          cat[getCourtKey(hr.dateStr, hr.slotId, court)] = 'wedstrijd';
-        } else {
-          const grp = pickDoubles();
-          if (!grp) return;
-          const { teamA, teamB } = grp;
-          const [x1, x2] = teamA,
-            [y1, y2] = teamB;
-          [x1, x2, y1, y2].forEach((p) => used.add(p));
-          const res: Reservation = {
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'double',
-            category: 'training',
-            players: [x1, x2, y1, y2],
-            notifiedFull: true,
-          };
-          result.push(res);
-          sendMatchFullMessages(res);
-          mt[getCourtKey(hr.dateStr, hr.slotId, court)] = 'double';
-          cat[getCourtKey(hr.dateStr, hr.slotId, court)] = 'training';
-        }
+        const pair = pickSingles();
+        if (!pair) return;
+        const [a, b] = pair;
+        used.add(a);
+        used.add(b);
+        playerCount[a] = (playerCount[a] || 0) + 1;
+        playerCount[b] = (playerCount[b] || 0) + 1;
+        const res: Reservation = {
+          date: hr.dateStr,
+          timeSlot: hr.slotId,
+          court,
+          matchType: 'single',
+          category: 'wedstrijd',
+          players: [a, b],
+          notifiedFull: true,
+        };
+        result.push(res);
+        sendMatchFullMessages(res);
+        mt[getCourtKey(hr.dateStr, hr.slotId, court)] = 'single';
+        cat[getCourtKey(hr.dateStr, hr.slotId, court)] = 'wedstrijd';
       });
     });
 
@@ -631,7 +570,8 @@ export default function Page() {
     const dateStr = selectedDate;
     setReservations((prev) => prev.filter((r) => r.date !== dateStr));
 
-    const { opponentCount } = buildCounts(dateStr);
+    const { opponentCount, playerCount } = buildCounts(dateStr);
+    PLAYERS.forEach((p) => (playerCount[p] = playerCount[p] || 0));
     const hours = TIME_SLOTS.map((slot) => ({
       dateStr,
       slotId: slot.id,
@@ -641,23 +581,36 @@ export default function Page() {
     const cat: Record<string, MatchCategory> = {};
     const oppSeen = (a: string, b: string) => opponentCount[pairKey(a, b)] || 0;
 
-    hours.forEach((hr, hourIdx) => {
-      const groups = hourIdx % 2 === 0 ? [4, 4, 2] : [4, 2, 2];
+    hours.forEach((hr) => {
+      const groups = [2, 2, 2];
       const used = new Set<string>();
       const available = new Set(playersAvailableFor(hr.dateStr, hr.slotId));
 
       const pickSingles = (): [string, string] | null => {
         const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
         if (cand.length < 2) return null;
-        const sorted = cand.slice().sort((a, b) => scoreOf(a) - scoreOf(b));
+        const sorted = cand
+          .slice()
+          .sort(
+            (a, b) =>
+              (playerCount[a] || 0) - (playerCount[b] || 0) ||
+              scoreOf(a) - scoreOf(b)
+          );
         let best: [string, string] | null = null;
         let bestScore = Infinity;
         for (let i = 0; i < sorted.length - 1; i++) {
           for (let j = i + 1; j < sorted.length; j++) {
             const a = sorted[i],
               b = sorted[j];
-            const diff = Math.abs(scoreOf(a) - scoreOf(b));
-            const s = diff * 12 + oppSeen(a, b) * 60 + Math.random() * 0.5;
+            const diffScore = Math.abs(scoreOf(a) - scoreOf(b));
+            const diffCount = Math.abs(
+              (playerCount[a] || 0) - (playerCount[b] || 0)
+            );
+            const s =
+              diffCount * 1000 +
+              diffScore * 12 +
+              oppSeen(a, b) * 60 +
+              Math.random() * 0.5;
             if (s < bestScore) {
               bestScore = s;
               best = [a, b];
@@ -667,93 +620,28 @@ export default function Page() {
         return best;
       };
 
-      const pickDoubles = () => {
-        const cand = PLAYERS.filter((p) => !used.has(p) && available.has(p));
-        if (cand.length < 4) return null;
-        let best: { teamA: [string, string]; teamB: [string, string] } | null =
-          null;
-        let bestScore = Infinity;
-
-        for (const [a, b, c, d] of combinations4(cand)) {
-          const splits: Array<[[string, string], [string, string]]> = [
-            [
-              [a, b],
-              [c, d],
-            ],
-            [
-              [a, c],
-              [b, d],
-            ],
-            [
-              [a, d],
-              [b, c],
-            ],
-          ];
-          for (const [t1, t2] of splits) {
-            const [x1, x2] = t1,
-              [y1, y2] = t2;
-            const sumA = scoreOf(x1) + scoreOf(x2);
-            const sumB = scoreOf(y1) + scoreOf(y2);
-            const sumDiff = Math.abs(sumA - sumB);
-            let s = 0;
-            s += sumDiff * 15;
-            s +=
-              oppSeen(x1, y1) +
-              oppSeen(x1, y2) +
-              oppSeen(x2, y1) +
-              oppSeen(x2, y2);
-            s += Math.random() * 0.5;
-            if (s < bestScore) {
-              bestScore = s;
-              best = { teamA: [x1, x2], teamB: [y1, y2] };
-            }
-          }
-        }
-        return best;
-      };
-
-      groups.forEach((size, idxInHour) => {
+      groups.forEach((_, idxInHour) => {
         const court = idxInHour + 1;
-        if (size === 2) {
-          const pair = pickSingles();
-          if (!pair) return;
-          const [a, b] = pair;
-          used.add(a);
-          used.add(b);
-          const res: Reservation = {
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'single',
-            category: 'wedstrijd',
-            players: [a, b],
-            notifiedFull: true,
-          };
-          result.push(res);
-          sendMatchFullMessages(res);
-          mt[getCourtKey(hr.dateStr, hr.slotId, court)] = 'single';
-          cat[getCourtKey(hr.dateStr, hr.slotId, court)] = 'wedstrijd';
-        } else {
-          const grp = pickDoubles();
-          if (!grp) return;
-          const { teamA, teamB } = grp;
-          const [x1, x2] = teamA,
-            [y1, y2] = teamB;
-          [x1, x2, y1, y2].forEach((p) => used.add(p));
-          const res: Reservation = {
-            date: hr.dateStr,
-            timeSlot: hr.slotId,
-            court,
-            matchType: 'double',
-            category: 'training',
-            players: [x1, x2, y1, y2],
-            notifiedFull: true,
-          };
-          result.push(res);
-          sendMatchFullMessages(res);
-          mt[getCourtKey(hr.dateStr, hr.slotId, court)] = 'double';
-          cat[getCourtKey(hr.dateStr, hr.slotId, court)] = 'training';
-        }
+        const pair = pickSingles();
+        if (!pair) return;
+        const [a, b] = pair;
+        used.add(a);
+        used.add(b);
+        playerCount[a] = (playerCount[a] || 0) + 1;
+        playerCount[b] = (playerCount[b] || 0) + 1;
+        const res: Reservation = {
+          date: hr.dateStr,
+          timeSlot: hr.slotId,
+          court,
+          matchType: 'single',
+          category: 'wedstrijd',
+          players: [a, b],
+          notifiedFull: true,
+        };
+        result.push(res);
+        sendMatchFullMessages(res);
+        mt[getCourtKey(hr.dateStr, hr.slotId, court)] = 'single';
+        cat[getCourtKey(hr.dateStr, hr.slotId, court)] = 'wedstrijd';
       });
     });
 
@@ -1199,45 +1087,35 @@ export default function Page() {
 
     return (
       <div className={courtClass}>
-        <div className="flex justify-center gap-2 mb-2">
-          <button
-            onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
-            className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'single'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-800'
-            }`}
-          >
-            👤👤
-          </button>
-          <button
-            onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
-            className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'double'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-800'
-            }`}
-          >
-            👥👥
-          </button>
-          <select
-            // *** Zichtbaar op mobiel: altijd donkere tekst op witte achtergrond
-            className="px-2 py-1 rounded text-sm bg-white text-gray-900 border border-gray-300"
-            value={getCategory(date, timeSlot, court)}
-            onChange={(e) =>
-              setCategoryFor(
-                date,
-                timeSlot,
-                court,
-                e.target.value as MatchCategory
-              )
-            }
-            title="Type"
-          >
-            <option value="training">Training</option>
-            <option value="wedstrijd">Wedstrijd</option>
-          </select>
-        </div>
+          <div className="flex justify-center gap-2 mb-2">
+            <button
+              onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
+              className={`px-3 py-1 rounded text-sm font-bold ${
+                matchType === 'single'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-800'
+              }`}
+            >
+              👤👤
+            </button>
+            <select
+              // *** Zichtbaar op mobiel: altijd donkere tekst op witte achtergrond
+              className="px-2 py-1 rounded text-sm bg-white text-gray-900 border border-gray-300"
+              value={getCategory(date, timeSlot, court)}
+              onChange={(e) =>
+                setCategoryFor(
+                  date,
+                  timeSlot,
+                  court,
+                  e.target.value as MatchCategory
+                )
+              }
+              title="Type"
+            >
+              <option value="training">Training</option>
+              <option value="wedstrijd">Wedstrijd</option>
+            </select>
+          </div>
 
         <div className="flex-1 grid place-items-center text-white/90 text-sm">
           Nog geen spelers
