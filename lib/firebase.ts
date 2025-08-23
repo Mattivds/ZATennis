@@ -57,7 +57,8 @@ export async function ensureAuth(): Promise<User> {
    - Biedt ook listeners voor reservations & availability
    ============================================================ */
 
-type MatchType = 'single' | 'double';
+// Enkelwedstrijden zijn de enige ondersteunde matchtypes
+type MatchType = 'single';
 type MatchCategory = 'training' | 'wedstrijd';
 
 export interface Reservation {
@@ -66,7 +67,7 @@ export interface Reservation {
   court: number; // 1..3
   matchType: MatchType;
   category: MatchCategory;
-  players: string[]; // single: [a,b], double: [x1,x2,y1,y2]
+  players: string[]; // [spelerA, spelerB]
   result?: { winner: string; loser: string } | null;
 }
 
@@ -76,7 +77,7 @@ const collReservations = collection(db, 'reservations');
 const collAvailability = collection(db, 'availability');
 
 // UI-state onder /ui/… (1 document per “helper”)
-const docMatchTypes = doc(db, 'ui', 'matchTypes'); // { [courtKey]: 'single' | 'double' }
+const docMatchTypes = doc(db, 'ui', 'matchTypes'); // { [courtKey]: 'single' }
 const docSelectedDate = doc(db, 'ui', 'selectedDate'); // { value: 'yyyy-MM-dd' }
 
 export const syncData = {

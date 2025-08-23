@@ -26,7 +26,8 @@ import { db, ensureAuth } from '@/lib/firebase';
 ========================= */
 type MatchCategory = 'training' | 'wedstrijd';
 
-type MatchType = 'single' | 'double';
+// Alleen enkelwedstrijden worden ondersteund
+type MatchType = 'single';
 
 interface Reservation {
   date: string; // yyyy-MM-dd
@@ -34,8 +35,8 @@ interface Reservation {
   court: number; // 1..3
   matchType: MatchType;
   category: MatchCategory; // training | wedstrijd
-  players: string[]; // single: [a,b], double: [x1,x2,y1,y2]
-  result?: { winner: string; loser: string } | null; // uitslag (alleen single + wedstrijd)
+  players: string[]; // [spelerA, spelerB]
+  result?: { winner: string; loser: string } | null; // uitslag (enkel bij single-wedstrijd)
 }
 
 type Availability = Record<string, Record<string, Record<string, boolean>>>;
@@ -79,21 +80,6 @@ const ADMIN_PASSWORD = 'ZAT2025*';
 ========================= */
 const scoreOf = (name: string) => PLAYERS_SCORES[name] ?? 0;
 const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
-
-function combinations4<T>(arr: T[]): Array<[T, T, T, T]> {
-  const res: Array<[T, T, T, T]> = [];
-  const n = arr.length;
-  for (let i = 0; i < n - 3; i++) {
-    for (let j = i + 1; j < n - 2; j++) {
-      for (let k = j + 1; k < n - 1; k++) {
-        for (let l = k + 1; l < n; l++) {
-          res.push([arr[i], arr[j], arr[k], arr[l]]);
-        }
-      }
-    }
-  }
-  return res;
-}
 
 /* =========================
    Storage keys (optioneel, voor UX/offline)
@@ -451,7 +437,7 @@ export default function Page() {
     player: string
   ) => {
     const key = getCourtKey(date, timeSlot, court);
-    const maxPlayers = getMatchType(date, timeSlot, court) === 'single' ? 2 : 4;
+    const maxPlayers = 2;
     setSelectedPlayers((prev) => {
       const arr = [...(prev[key] || [])];
       while (arr.length < maxPlayers) arr.push('');
@@ -470,7 +456,7 @@ export default function Page() {
     const playersData = (selectedPlayers[key] || []).filter(Boolean);
     const matchType = getMatchType(date, timeSlot, court);
     const category = getCategory(date, timeSlot, court);
-    const requiredPlayers = matchType === 'single' ? 2 : 4;
+    const requiredPlayers = 2;
 
     if (playersData.length !== requiredPlayers) {
       alert(`Selecteer alle ${requiredPlayers} spelers voor dit terrein`);
@@ -576,21 +562,9 @@ export default function Page() {
       r.players.forEach((p) => {
         playerCount[p] = (playerCount[p] || 0) + 1;
       });
-      if (r.matchType === 'single') {
-        const [a, b] = r.players;
-        opponentCount[pairKey(a, b)] = (opponentCount[pairKey(a, b)] || 0) + 1;
-      } else {
-        const [x1, x2, y1, y2] = r.players;
-        [
-          [x1, y1],
-          [x1, y2],
-          [x2, y1],
-          [x2, y2],
-        ].forEach(([a, b]) => {
-          const k = pairKey(a, b);
-          opponentCount[k] = (opponentCount[k] || 0) + 1;
-        });
-      }
+      const [a, b] = r.players;
+      opponentCount[pairKey(a, b)] =
+        (opponentCount[pairKey(a, b)] || 0) + 1;
     });
     return { opponentCount, playerCount };
   };
@@ -811,7 +785,7 @@ export default function Page() {
   const ReservationBadge = ({ r }: { r: Reservation }) => (
     <div className="absolute top-1 left-1 flex gap-1">
       <div className="bg-white rounded-full px-2 py-1 text-[10px] font-bold">
-        {r.matchType === 'single' ? '👤👤' : '👥👥'}
+        👤👤
       </div>
       <div
         className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
@@ -852,7 +826,6 @@ export default function Page() {
       const mayEdit = canModifyReservation(reservation);
       const canMarkWinner =
         reservation.category === 'wedstrijd' &&
-        reservation.matchType === 'single' &&
         (!reservation.result || (reservation.result && isAdmin));
 
       const winner = reservation.result?.winner ?? undefined;
@@ -877,57 +850,27 @@ export default function Page() {
         <div className={courtClass}>
           <ReservationBadge r={reservation} />
 
-          {reservation.matchType === 'single' ? (
-            <>
-              <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
-                <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[0]}
-                    size="md"
-                    highlight={winner === reservation.players[0]}
-                  />
-                </div>
+          <>
+            <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
+              <div className="flex items-center justify-center">
+                <PlayerChip
+                  name={reservation.players[0]}
+                  size="md"
+                  highlight={winner === reservation.players[0]}
+                />
               </div>
-              <TennisNet />
-              <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
-                <div className="flex items-center justify-center">
-                  <PlayerChip
-                    name={reservation.players[1]}
-                    size="md"
-                    highlight={winner === reservation.players[1]}
-                  />
-                </div>
+            </div>
+            <TennisNet />
+            <div className="bg-blue-600 text-white text-center py-3 rounded border-2 border-white text-base font-semibold">
+              <div className="flex items-center justify-center">
+                <PlayerChip
+                  name={reservation.players[1]}
+                  size="md"
+                  highlight={winner === reservation.players[1]}
+                />
               </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-1">
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[0]} size="sm" />
-                  </div>
-                </div>
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[1]} size="sm" />
-                  </div>
-                </div>
-              </div>
-              <TennisNet />
-              <div className="space-y-1">
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[2]} size="sm" />
-                  </div>
-                </div>
-                <div className="bg-blue-600 text-white text-center py-2 rounded border-2 border-white text-sm font-semibold">
-                  <div className="flex items-center justify-center">
-                    <PlayerChip name={reservation.players[3]} size="sm" />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+            </div>
+          </>
 
           {mayEdit && (
             <button
@@ -950,23 +893,9 @@ export default function Page() {
         <div className="flex justify-center gap-2 mb-2">
           <button
             onClick={() => setMatchTypeFor(date, timeSlot, court, 'single')}
-            className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'single'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700'
-            }`}
+            className="px-3 py-1 rounded text-sm font-bold bg-blue-600 text-white"
           >
             👤👤
-          </button>
-          <button
-            onClick={() => setMatchTypeFor(date, timeSlot, court, 'double')}
-            className={`px-3 py-1 rounded text-sm font-bold ${
-              matchType === 'double'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700'
-            }`}
-          >
-            👥👥
           </button>
           <select
             className="px-2 py-1 rounded text-sm bg-white border border-gray-300"
@@ -986,7 +915,7 @@ export default function Page() {
           </select>
         </div>
 
-        {Array.from({ length: matchType === 'single' ? 2 : 4 }).map(
+        {Array.from({ length: 2 }).map(
           (_, idx) => (
             <div key={`sel-${idx}`}>
               <select
@@ -1003,9 +932,7 @@ export default function Page() {
                   </option>
                 ))}
               </select>
-              {(matchType === 'single' ? idx === 0 : idx === 1) && (
-                <TennisNet />
-              )}
+              {idx === 0 && <TennisNet />}
             </div>
           )
         )}
@@ -1013,8 +940,7 @@ export default function Page() {
         <button
           onClick={() => handleReservation(date, timeSlot, court)}
           disabled={
-            (selectedPlayers[key] || []).filter(Boolean).length !==
-              (matchType === 'single' ? 2 : 4) ||
+            (selectedPlayers[key] || []).filter(Boolean).length !== 2 ||
             (selectedPlayers[key] || []).some((p) => !p)
           }
           className="w-full bg-blue-600 text-white py-2 px-3 rounded text-sm disabled:opacity-50"
